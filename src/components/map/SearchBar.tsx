@@ -7,9 +7,10 @@ interface SearchBarProps {
 }
 
 interface SearchResult {
-  id: string;
-  place_name: string;
-  center: [number, number];
+  place_id: number;
+  display_name: string;
+  lon: string;
+  lat: string;
 }
 
 export default function SearchBar({ onPlaceSelect }: SearchBarProps) {
@@ -38,14 +39,15 @@ export default function SearchBar({ onPlaceSelect }: SearchBarProps) {
     }
 
     debounceRef.current = setTimeout(async () => {
-      const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+      // Nominatim (OpenStreetMap) — free, no API key
       const res = await fetch(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(q)}.json?access_token=${token}&limit=5`
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=5`,
+        { headers: { 'Accept-Language': 'fr' } }
       );
-      const data = await res.json();
-      setResults(data.features || []);
+      const data: SearchResult[] = await res.json();
+      setResults(data);
       setIsOpen(true);
-    }, 300);
+    }, 400);
   };
 
   return (
@@ -64,15 +66,15 @@ export default function SearchBar({ onPlaceSelect }: SearchBarProps) {
         <div className="absolute top-full mt-1 w-full bg-white rounded-lg shadow-lg overflow-hidden z-50">
           {results.map((r) => (
             <button
-              key={r.id}
+              key={r.place_id}
               onClick={() => {
-                onPlaceSelect(r.center[0], r.center[1], r.place_name);
-                setQuery(r.place_name);
+                onPlaceSelect(parseFloat(r.lon), parseFloat(r.lat), r.display_name);
+                setQuery(r.display_name.split(',')[0]);
                 setIsOpen(false);
               }}
               className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-blue-50 transition-colors border-b border-gray-100 last:border-0"
             >
-              {r.place_name}
+              {r.display_name}
             </button>
           ))}
         </div>

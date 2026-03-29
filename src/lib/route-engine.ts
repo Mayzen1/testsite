@@ -1,15 +1,12 @@
-import type { Waypoint, RoutePoint, RouteSegment, RouteStats } from './types';
-
-const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN!;
+import type { Waypoint, RoutePoint, RouteStats } from './types';
 
 /**
- * Route Engine: orchestrates snap-to-road, elevation enrichment, and stats computation.
+ * Route Engine: orchestrates snap-to-road (OSRM), elevation enrichment, and stats computation.
  */
 
 /**
- * Snap waypoints to real roads using Mapbox Directions API.
- * Sends waypoints in batches (max 25 per request) and returns
- * the full route geometry as [lng, lat][] coordinates.
+ * Snap waypoints to real roads using OSRM API (via our proxy).
+ * Sends waypoints in batches and returns the full route geometry as [lng, lat][] coordinates.
  */
 export async function snapToRoads(
   waypoints: Waypoint[]

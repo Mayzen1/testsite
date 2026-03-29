@@ -10,7 +10,7 @@ import type { Waypoint, DrawMode, RouteStats, RoutePoint } from '@/lib/types';
 import { buildRoutePoints, computeStats } from '@/lib/route-engine';
 import { humanizeTimestamps, generateGPX } from '@/lib/gpx-generator';
 
-// Mapbox GL requires browser APIs — load client-side only
+// Leaflet requires browser APIs — load client-side only
 const MapView = dynamic(() => import('@/components/map/MapView'), { ssr: false });
 
 export default function Home() {
@@ -23,6 +23,7 @@ export default function Home() {
   const [stats, setStats] = useState<RouteStats | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [flyTo, setFlyTo] = useState<[number, number] | null>(null);
 
   const handleWaypointAdd = useCallback((wp: Waypoint) => {
     setWaypoints((prev) => [...prev, wp]);
@@ -62,8 +63,8 @@ export default function Home() {
     }
   }, []);
 
-  const handlePlaceSelect = useCallback((_lng: number, _lat: number, _name: string) => {
-    // Place selection — could fly to location if we had map ref
+  const handlePlaceSelect = useCallback((lng: number, lat: number, _name: string) => {
+    setFlyTo([lat, lng]);
   }, []);
 
   const handleGenerate = useCallback(async () => {
@@ -111,6 +112,7 @@ export default function Home() {
           onWaypointsSet={handleWaypointsSet}
           drawMode={drawMode}
           shapeSize={shapeSize}
+          flyTo={flyTo}
         />
 
         {/* Search bar overlay */}

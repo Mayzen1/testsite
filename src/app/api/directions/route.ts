@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 /**
- * Proxy for Mapbox Directions API.
- * Keeps the Mapbox token server-side and handles CORS.
+ * Proxy for OSRM (Open Source Routing Machine) API.
+ * Free, no API key required. Uses the public demo server.
+ * Profile: foot (walking/running).
  */
 export async function GET(req: NextRequest) {
   const coordinates = req.nextUrl.searchParams.get('coordinates');
@@ -11,21 +12,17 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Missing coordinates parameter' }, { status: 400 });
   }
 
-  const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
-  if (!token) {
-    return NextResponse.json({ error: 'Mapbox token not configured' }, { status: 500 });
-  }
-
-  const url = `https://api.mapbox.com/directions/v5/mapbox/walking/${coordinates}?geometries=geojson&overview=full&access_token=${token}`;
+  // OSRM expects coordinates as lng,lat;lng,lat;...
+  const url = `https://router.project-osrm.org/route/v1/foot/${coordinates}?overview=full&geometries=geojson`;
 
   try {
     const res = await fetch(url);
     const data = await res.json();
 
-    if (!res.ok) {
+    if (!res.ok || data.code !== 'Ok') {
       return NextResponse.json(
-        { error: data.message || 'Mapbox API error' },
-        { status: res.status }
+        { error: data.message || 'OSRM routing error' },
+        { status: res.ok ? 400 : res.status }
       );
     }
 
