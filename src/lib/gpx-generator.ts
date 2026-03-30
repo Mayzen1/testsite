@@ -1,159 +1,154 @@
-import type { RoutePoint, ActivityConfig } from './types';
+import type { RoutePoint, RunDetails } from "./types";
 
-/**
- * GPX Generation Engine
- *
- * This module handles the "humanization" of timestamps and the final GPX XML output.
- *
- * HUMANIZATION ALGORITHM:
- * -----------------------
- * Real runners don't maintain a perfectly constant pace. Our algorithm introduces
- * realistic variations using several factors:
- *
- * 1. ELEVATION IMPACT: When going uphill, pace slows proportionally to gradient.
- *    Formula: paceMultiplier = 1 + (gradient * 3.0) for uphills
- *             paceMultiplier = 1 - (|gradient| * 1.5) for downhills (capped at 0.7x)
- *
- * 2. FATIGUE MODEL: A gradual slowdown over the course of the run.
- *    Formula: fatigueMultiplier = 1 + (progressRatio * 0.08)
- *    This means at the end of the run, pace is ~8% slower than at the start.
- *
- * 3. RANDOM MICRO-VARIATIONS: Small ±5% jitter on each segment to simulate
- *    natural cadence fluctuations.
- *    Formula: jitter = 1 + (random(-0.05, 0.05))
- *
- * The final pace for each segment is:
- *    effectivePace = basePace * elevationMultiplier * fatigueMultiplier * jitter
- */
-
-/**
- * Compute the gradient (slope) between two consecutive route points.
- * Returns a value between roughly -0.3 and 0.3 (clamped).
- */
-function computeGradient(prev: RoutePoint, curr: RoutePoint): number {
-  const horizontalDist = curr.distance - prev.distance;
-  if (horizontalDist < 0.5) return 0; // avoid division by near-zero
-  const elevDiff = curr.elevation - prev.elevation;
-  const gradient = elevDiff / horizontalDist;
-  return Math.max(-0.3, Math.min(0.3, gradient));
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
-/**
- * Seeded pseudo-random number generator (Mulberry32).
- * Ensures reproducible GPX output for the same route.
- */
-function seededRandom(seed: number): () => number {
-  let s = seed;
+// Seeded random (Mulberry32)
+function mulberry32(seed: number) {
   return () => {
-    s |= 0;
-    s = (s + 0x6d2b79f5) | 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
-/**
- * Assigns realistic timestamps to each RoutePoint based on the activity config.
- * Mutates the `timestamp` field of each point in place.
- */
-export function humanizeTimestamps(
+// Apply realistic timestamp distribution with pace variations
+function humanizeTimestamps(
   points: RoutePoint[],
-  config: ActivityConfig
+  details: RunDetails
 ): RoutePoint[] {
-  if (points.length === 0) return points;
+  if (points.length < 2) return points;
 
-  const basePaceSecPerMeter = (config.paceMinPerKm * 60) / 1000;
   const totalDistance = points[points.length - 1].distance;
-  const rand = seededRandom(Math.floor(points[0].lng * 10000 + points[0].lat * 10000));
+  if (totalDistance === 0) return points;
 
-  let currentTime = config.startTime.getTime();
-  points[0].timestamp = new Date(currentTime).toISOString();
+  const basePaceSecPerMeter = (details.paceMinPerKm * 60) / 1000;
+  const seed = details.date.length + details.paceMinPerKm * 100;
+  const rng = mulberry32(seed);
+  const inconsistency = details.paceInconsistency / 100;
 
-  for (let i = 1; i < points.length; i++) {
-    const prev = points[i - 1];
-    const curr = points[i];
-    const segmentDist = curr.distance - prev.distance;
+  // Parse start time
+  const [year, month, day] = details.date.split("-").map(Number);
+  const [hour, minute] = details.startTime.split(":").map(Number);
+  const startDate = new Date(year, month - 1, day, hour, minute, 0);
+  let currentTime = startDate.getTime();
 
-    if (segmentDist <= 0) {
-      curr.timestamp = new Date(currentTime).toISOString();
+  const result: RoutePoint[] = [];
+
+  for (let i = 0; i < points.length; i++) {
+    if (i === 0) {
+      result.push({
+        ...points[i],
+        timestamp: new Date(currentTime).toISOString(),
+        heartRate: details.includeHeartRate ? 130 + Math.round(rng() * 20) : undefined,
+      });
       continue;
     }
 
-    // 1. Elevation impact on pace
-    const gradient = computeGradient(prev, curr);
-    let elevationMultiplier: number;
-    if (gradient > 0) {
-      // Uphill: significant slowdown. A 10% gradient -> 1.30x slower
-      elevationMultiplier = 1 + gradient * 3.0;
-    } else {
-      // Downhill: moderate speedup, capped so we don't go unrealistically fast
-      elevationMultiplier = Math.max(0.7, 1 + gradient * 1.5);
+    const segmentDist = points[i].distance - points[i - 1].distance;
+    if (segmentDist <= 0) {
+      result.push({
+        ...points[i],
+        timestamp: new Date(currentTime).toISOString(),
+        heartRate: details.includeHeartRate ? result[i - 1].heartRate : undefined,
+      });
+      continue;
     }
 
-    // 2. Fatigue model: linear increase over total distance
-    //    At 0% progress -> 1.0x, at 100% progress -> 1.08x
-    const progressRatio = prev.distance / Math.max(totalDistance, 1);
-    const fatigueMultiplier = 1 + progressRatio * 0.08;
+    // Elevation impact on pace
+    const elevDiff = points[i].elevation - points[i - 1].elevation;
+    const gradient = segmentDist > 0 ? elevDiff / segmentDist : 0;
+    let elevationMultiplier = 1.0;
+    if (gradient > 0) {
+      elevationMultiplier = 1.0 + gradient * 3.0; // uphills slow down
+    } else {
+      elevationMultiplier = Math.max(0.7, 1.0 + gradient * 1.5); // downhills speed up
+    }
 
-    // 3. Micro-jitter: ±5% random variation per segment
-    const jitter = 1 + (rand() - 0.5) * 0.10;
+    // Fatigue model: +8% slowdown by end
+    const progress = i / points.length;
+    const fatigueMultiplier = 1.0 + progress * 0.08;
 
-    // Combine all multipliers
-    const effectivePace = basePaceSecPerMeter * elevationMultiplier * fatigueMultiplier * jitter;
+    // Micro-jitter: ±5% per segment + pace inconsistency
+    const jitter = 1.0 + (rng() - 0.5) * 0.1 + (rng() - 0.5) * inconsistency * 0.5;
 
-    // Time for this segment
-    const segmentTime = segmentDist * effectivePace;
-    currentTime += segmentTime * 1000; // convert to milliseconds
+    const segmentPace = basePaceSecPerMeter * elevationMultiplier * fatigueMultiplier * jitter;
+    const segmentTime = segmentDist * segmentPace;
 
-    curr.timestamp = new Date(currentTime).toISOString();
+    currentTime += segmentTime * 1000;
+
+    // Heart rate simulation
+    let hr: number | undefined;
+    if (details.includeHeartRate) {
+      const baseHr = details.activityType === "run" ? 155 : 140;
+      const effortFactor = elevationMultiplier * fatigueMultiplier;
+      hr = Math.round(baseHr * effortFactor + (rng() - 0.5) * 10);
+      hr = Math.max(100, Math.min(200, hr));
+    }
+
+    result.push({
+      ...points[i],
+      timestamp: new Date(currentTime).toISOString(),
+      heartRate: hr,
+    });
   }
 
-  return points;
+  return result;
 }
 
-/**
- * Generates a valid GPX XML string from an array of RoutePoints.
- */
 export function generateGPX(
   points: RoutePoint[],
-  activityName: string = 'FakeMyRun Activity'
+  details: RunDetails
 ): string {
-  const trackpoints = points
-    .map(
-      (p) =>
-        `      <trkpt lat="${p.lat.toFixed(7)}" lon="${p.lng.toFixed(7)}">
-        <ele>${p.elevation.toFixed(1)}</ele>
-        <time>${p.timestamp}</time>
-      </trkpt>`
-    )
-    .join('\n');
+  const timestamped = humanizeTimestamps(points, details);
 
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<gpx xmlns="http://www.topografix.com/GPX/1/1"
-     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-     xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd"
-     version="1.1"
-     creator="FakeMyRun Clone">
+  const activityName = details.activityType === "run" ? "Running" : "Biking";
+  const name = details.name || `${activityName} Activity`;
+
+  let gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx creator="FakeMyRun" version="1.1"
+  xmlns="http://www.topografix.com/GPX/1/1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1"
+  xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
   <metadata>
-    <name>${escapeXml(activityName)}</name>
-    <time>${points[0]?.timestamp ?? new Date().toISOString()}</time>
+    <name>${escapeXml(name)}</name>
+    <desc>${escapeXml(details.description || "")}</desc>
+    <time>${timestamped[0]?.timestamp || new Date().toISOString()}</time>
   </metadata>
   <trk>
-    <name>${escapeXml(activityName)}</name>
-    <type>running</type>
+    <name>${escapeXml(name)}</name>
+    <type>${details.activityType === "run" ? "9" : "1"}</type>
     <trkseg>
-${trackpoints}
-    </trkseg>
+`;
+
+  for (const pt of timestamped) {
+    gpx += `      <trkpt lat="${pt.lat.toFixed(7)}" lon="${pt.lng.toFixed(7)}">
+        <ele>${pt.elevation.toFixed(1)}</ele>
+${pt.timestamp ? `        <time>${pt.timestamp}</time>\n` : ""}`;
+
+    if (pt.heartRate) {
+      gpx += `        <extensions>
+          <gpxtpx:TrackPointExtension>
+            <gpxtpx:hr>${pt.heartRate}</gpxtpx:hr>
+          </gpxtpx:TrackPointExtension>
+        </extensions>
+`;
+    }
+    gpx += `      </trkpt>\n`;
+  }
+
+  gpx += `    </trkseg>
   </trk>
 </gpx>`;
-}
 
-function escapeXml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
+  return gpx;
 }

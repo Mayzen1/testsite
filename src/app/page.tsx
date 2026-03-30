@@ -1,198 +1,131 @@
-'use client';
+import Link from "next/link";
+import { Header } from "@/components/header";
+import { Footer } from "@/components/footer";
+import { MapPin, FileDown, Route } from "lucide-react";
 
-import { useState, useCallback } from 'react';
-import dynamic from 'next/dynamic';
-import SearchBar from '@/components/map/SearchBar';
-import ToolBar from '@/components/panels/ToolBar';
-import ConfigPanel from '@/components/panels/ConfigPanel';
-import ElevationChart from '@/components/panels/ElevationChart';
-import type { Waypoint, DrawMode, RouteStats, RoutePoint } from '@/lib/types';
-import { buildRoutePoints, computeStats } from '@/lib/route-engine';
-import { humanizeTimestamps, generateGPX } from '@/lib/gpx-generator';
-
-// Leaflet requires browser APIs — load client-side only
-const MapView = dynamic(() => import('@/components/map/MapView'), { ssr: false });
-
-export default function Home() {
-  const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
-  const [routeGeometry, setRouteGeometry] = useState<[number, number][] | null>(null);
-  const [routePoints, setRoutePoints] = useState<RoutePoint[]>([]);
-  const [drawMode, setDrawMode] = useState<DrawMode>('free');
-  const [shapeSize, setShapeSize] = useState(2);
-  const [paceMinPerKm, setPaceMinPerKm] = useState(5.5);
-  const [stats, setStats] = useState<RouteStats | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [flyTo, setFlyTo] = useState<[number, number] | null>(null);
-
-  const handleWaypointAdd = useCallback((wp: Waypoint) => {
-    setWaypoints((prev) => [...prev, wp]);
-    setRouteGeometry(null);
-    setStats(null);
-    setRoutePoints([]);
-  }, []);
-
-  const handleWaypointsSet = useCallback((wps: Waypoint[]) => {
-    setWaypoints(wps);
-    setRouteGeometry(null);
-    setStats(null);
-    setRoutePoints([]);
-  }, []);
-
-  const handleUndo = useCallback(() => {
-    setWaypoints((prev) => prev.slice(0, -1));
-    setRouteGeometry(null);
-    setStats(null);
-    setRoutePoints([]);
-  }, []);
-
-  const handleClear = useCallback(() => {
-    setWaypoints([]);
-    setRouteGeometry(null);
-    setStats(null);
-    setRoutePoints([]);
-    setDrawMode('free');
-  }, []);
-
-  const handleDrawModeChange = useCallback((mode: DrawMode) => {
-    setDrawMode(mode);
-    if (mode !== 'free') {
-      setRouteGeometry(null);
-      setStats(null);
-      setRoutePoints([]);
-    }
-  }, []);
-
-  const handlePlaceSelect = useCallback((lng: number, lat: number, _name: string) => {
-    setFlyTo([lat, lng]);
-  }, []);
-
-  const handleGenerate = useCallback(async () => {
-    if (waypoints.length < 2) return;
-
-    setIsLoading(true);
-    try {
-      const points = await buildRoutePoints(waypoints);
-
-      if (points.length === 0) {
-        alert('Impossible de calculer le parcours. Vérifiez les waypoints.');
-        return;
-      }
-
-      const routeStats = computeStats(points, paceMinPerKm);
-      setStats(routeStats);
-      setRouteGeometry(points.map((p) => [p.lng, p.lat] as [number, number]));
-
-      const humanized = humanizeTimestamps(points, {
-        paceMinPerKm,
-        startTime: new Date(),
-        activityType: 'running',
-      });
-
-      setRoutePoints(humanized);
-
-      const gpxContent = generateGPX(humanized, `FakeMyRun - ${(routeStats.totalDistance / 1000).toFixed(1)}km`);
-      downloadFile(gpxContent, 'fakemyrun-activity.gpx', 'application/gpx+xml');
-    } catch (err) {
-      console.error('GPX generation failed:', err);
-      alert(`Erreur: ${err instanceof Error ? err.message : 'Échec de la génération'}`);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [waypoints, paceMinPerKm]);
-
+export default function HomePage() {
   return (
-    <div className="h-full flex relative">
-      {/* Map (full page) */}
-      <div className="flex-1 relative">
-        <MapView
-          waypoints={waypoints}
-          routeGeometry={routeGeometry}
-          onWaypointAdd={handleWaypointAdd}
-          onWaypointsSet={handleWaypointsSet}
-          drawMode={drawMode}
-          shapeSize={shapeSize}
-          flyTo={flyTo}
-        />
+    <div className="min-h-screen flex flex-col bg-white dark:bg-gray-950">
+      <Header />
 
-        {/* Search bar overlay */}
-        <div className="absolute top-4 left-4 z-10">
-          <SearchBar onPlaceSelect={handlePlaceSelect} />
-        </div>
-
-        {/* Sidebar toggle */}
-        <button
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          className="absolute top-4 right-4 z-10 bg-white rounded-lg shadow-lg p-2.5 hover:bg-gray-50 transition-colors"
-        >
-          <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            {sidebarOpen ? (
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-            ) : (
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-            )}
-          </svg>
-        </button>
-      </div>
-
-      {/* Right sidebar */}
-      <div
-        className={`transition-all duration-300 ease-in-out ${
-          sidebarOpen ? 'w-80' : 'w-0'
-        } overflow-hidden flex-shrink-0`}
-      >
-        <div className="w-80 h-full bg-gray-50 border-l border-gray-200 overflow-y-auto p-4 space-y-4">
-          <div className="text-center pb-2 border-b border-gray-200">
-            <h1 className="text-xl font-bold text-gray-800">FakeMyRun</h1>
-            <p className="text-xs text-gray-400">Générateur de GPX réaliste</p>
-          </div>
-
-          <ToolBar
-            drawMode={drawMode}
-            onDrawModeChange={handleDrawModeChange}
-            shapeSize={shapeSize}
-            onShapeSizeChange={setShapeSize}
-            onClear={handleClear}
-            onUndo={handleUndo}
-            waypointCount={waypoints.length}
-          />
-
-          <ConfigPanel
-            paceMinPerKm={paceMinPerKm}
-            onPaceChange={setPaceMinPerKm}
-            stats={stats}
-            isLoading={isLoading}
-            onGenerate={handleGenerate}
-            canGenerate={waypoints.length >= 2}
-          />
-
-          {routePoints.length > 0 && <ElevationChart points={routePoints} />}
-
-          {waypoints.length === 0 && (
-            <div className="bg-blue-50 rounded-lg p-4 text-xs text-blue-700 space-y-1">
-              <p className="font-semibold">Comment utiliser :</p>
-              <ol className="list-decimal list-inside space-y-1">
-                <li>Cliquez sur la carte pour placer des waypoints</li>
-                <li>Ou choisissez une forme automatique</li>
-                <li>Ajustez l&apos;allure souhaitée</li>
-                <li>Cliquez &quot;Générer &amp; Télécharger GPX&quot;</li>
-              </ol>
+      {/* Hero */}
+      <section className="flex-1">
+        <div className="max-w-6xl mx-auto px-4 py-16 md:py-24">
+          <div className="grid md:grid-cols-2 gap-12 items-center">
+            <div>
+              <h1 className="text-4xl md:text-5xl font-bold tracking-tight dark:text-white">
+                Create{" "}
+                <span className="text-orange-500">Fake Running Routes</span>
+              </h1>
+              <p className="mt-6 text-lg text-gray-600 dark:text-gray-400 leading-relaxed">
+                Design custom, realistic running or cycling routes anywhere in the world.
+                Generate GPX files with accurate elevation, pace data, and timestamps.
+                Import them into Strava, Garmin, or any fitness app.
+              </p>
+              <div className="mt-8 flex flex-col sm:flex-row gap-4">
+                <Link
+                  href="/create"
+                  className="inline-flex items-center justify-center gap-2 bg-orange-500 text-white px-6 py-3 rounded-md font-medium hover:bg-orange-600 transition-colors"
+                >
+                  Create Your Route
+                </Link>
+                <Link
+                  href="/how-it-works"
+                  className="inline-flex items-center justify-center gap-2 border border-gray-300 dark:border-gray-600 px-6 py-3 rounded-md font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                >
+                  Learn More
+                </Link>
+              </div>
             </div>
-          )}
+            <div className="relative aspect-video rounded-xl overflow-hidden shadow-2xl bg-gray-100 dark:bg-gray-800">
+              <iframe
+                src="https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&mute=1&loop=1&controls=0"
+                title="FakeMyRun Demo"
+                className="absolute inset-0 w-full h-full"
+                allow="autoplay; encrypted-media"
+                allowFullScreen
+              />
+            </div>
+          </div>
         </div>
-      </div>
+      </section>
+
+      {/* How It Works */}
+      <section className="bg-gray-50 dark:bg-gray-900 py-16">
+        <div className="max-w-6xl mx-auto px-4">
+          <h2 className="text-3xl font-bold text-center mb-12 dark:text-white">
+            How It Works
+          </h2>
+          <div className="grid md:grid-cols-3 gap-8">
+            <StepCard
+              step={1}
+              icon={<Route className="h-8 w-8 text-orange-500" />}
+              title="Design Your Route"
+              description="Draw a route manually, or generate shapes like hearts and circles. Routes snap to real roads for authenticity."
+            />
+            <StepCard
+              step={2}
+              icon={<MapPin className="h-8 w-8 text-orange-500" />}
+              title="Generate GPX"
+              description="Configure pace, elevation, heart rate, and timestamps. Our engine creates realistic, plausible data."
+            />
+            <StepCard
+              step={3}
+              icon={<FileDown className="h-8 w-8 text-orange-500" />}
+              title="Download & Import"
+              description="Download your GPX file and import it into Strava, Garmin, Nike Run Club, or any fitness platform."
+            />
+          </div>
+          <p className="text-center text-sm text-gray-500 dark:text-gray-400 mt-8">
+            Starting with 10 free tokens. Each download costs 1 token.
+          </p>
+        </div>
+      </section>
+
+      {/* CTA Section */}
+      <section className="py-16">
+        <div className="max-w-4xl mx-auto px-4 text-center">
+          <h2 className="text-3xl font-bold mb-4 dark:text-white">
+            Ready to Create Your Route?
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400 mb-8">
+            Start designing your custom running route now. No account needed.
+          </p>
+          <Link
+            href="/create"
+            className="inline-flex items-center justify-center gap-2 bg-orange-500 text-white px-8 py-3 rounded-md font-medium text-lg hover:bg-orange-600 transition-colors"
+          >
+            Create Your Route
+          </Link>
+        </div>
+      </section>
+
+      <Footer />
     </div>
   );
 }
 
-function downloadFile(content: string, filename: string, mimeType: string) {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+function StepCard({
+  step,
+  icon,
+  title,
+  description,
+}: {
+  step: number;
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border dark:border-gray-700">
+      <div className="flex items-center gap-3 mb-4">
+        <span className="flex items-center justify-center h-8 w-8 rounded-full bg-orange-100 dark:bg-orange-500/20 text-orange-500 text-sm font-bold">
+          {step}
+        </span>
+        {icon}
+      </div>
+      <h3 className="text-lg font-semibold mb-2 dark:text-white">{title}</h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">{description}</p>
+    </div>
+  );
 }
