@@ -8,7 +8,7 @@ import { Header } from "@/components/header";
 import { Button } from "@/components/ui/button";
 import { SearchBar } from "@/components/map/search-bar";
 import { RunDetailsPanel } from "@/components/panels/run-details";
-import { PaceProfile, ElevationProfile } from "@/components/panels/data-viz";
+import { PaceProfile, ElevationProfile, SpeedProfile, PowerProfile } from "@/components/panels/data-viz";
 import { useToast } from "@/components/ui/toast";
 import { snapToRoads, buildRoutePoints, computeStats } from "@/lib/route-engine";
 import { generateGPX } from "@/lib/gpx-generator";
@@ -32,6 +32,14 @@ const defaultDetails: RunDetails = {
   paceMinPerKm: 5.5,
   paceInconsistency: 5,
   includeHeartRate: false,
+  avgSpeedKmh: 25,
+  ftp: 200,
+  includePower: false,
+  includeCadence: false,
+  avgCadence: 85,
+  bikeType: "road",
+  drafting: false,
+  weight: 80,
 };
 
 export default function CreatePage() {
@@ -48,6 +56,12 @@ export default function CreatePage() {
     estimatedDuration: 0,
     averagePace: 5.5,
     paceInconsistency: 5,
+    averageSpeedKmh: 25,
+    maxSpeedKmh: 0,
+    averagePower: 0,
+    normalizedPower: 0,
+    averageCadence: 85,
+    calories: 0,
   });
   const [details, setDetails] = useState<RunDetails>(defaultDetails);
   const [drawMode, setDrawMode] = useState<DrawMode>("draw");
@@ -55,37 +69,40 @@ export default function CreatePage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  // Recalculate stats when pace changes
+  const calcStats = useCallback((pts: RoutePoint[], d: RunDetails) => {
+    return computeStats(pts, d.paceMinPerKm, d.paceInconsistency, d.activityType, {
+      avgSpeedKmh: d.avgSpeedKmh,
+      ftp: d.ftp,
+      avgCadence: d.avgCadence,
+      weight: d.weight,
+    });
+  }, []);
+
+  // Recalculate stats when any parameter changes
   useEffect(() => {
     if (routePoints.length >= 2) {
-      setStats(computeStats(routePoints, details.paceMinPerKm, details.paceInconsistency));
+      setStats(calcStats(routePoints, details));
     }
-  }, [details.paceMinPerKm, details.paceInconsistency, routePoints]);
+  }, [details, routePoints, calcStats]);
 
   const processRoute = useCallback(
     async (wps: Waypoint[]) => {
       if (wps.length < 2) {
         setRouteGeometry([]);
         setRoutePoints([]);
-        setStats({
-          totalDistance: 0,
-          totalElevationGain: 0,
-          totalElevationLoss: 0,
-          estimatedDuration: 0,
-          averagePace: details.paceMinPerKm,
-          paceInconsistency: details.paceInconsistency,
-        });
+        setStats(calcStats([], details));
         return;
       }
 
       setIsProcessing(true);
       try {
-        const { geometry } = await snapToRoads(wps);
+        const profile = details.activityType === 'bike' ? 'cycling' : 'walking';
+        const { geometry } = await snapToRoads(wps, profile);
         setRouteGeometry(geometry);
 
         const points = buildRoutePoints(geometry, mapRef.current);
         setRoutePoints(points);
-        setStats(computeStats(points, details.paceMinPerKm, details.paceInconsistency));
+        setStats(calcStats(points, details));
       } catch (error) {
         console.error("Route processing error:", error);
         toast({ title: "Route Error", description: "Could not process route. Using raw points.", variant: "error" });
@@ -95,7 +112,7 @@ export default function CreatePage() {
         setIsProcessing(false);
       }
     },
-    [details.paceMinPerKm, details.paceInconsistency, toast]
+    [details, calcStats, toast]
   );
 
   const handleMapClick = useCallback(
@@ -138,15 +155,8 @@ export default function CreatePage() {
     setWaypoints([]);
     setRouteGeometry([]);
     setRoutePoints([]);
-    setStats({
-      totalDistance: 0,
-      totalElevationGain: 0,
-      totalElevationLoss: 0,
-      estimatedDuration: 0,
-      averagePace: details.paceMinPerKm,
-      paceInconsistency: details.paceInconsistency,
-    });
-  }, [details.paceMinPerKm, details.paceInconsistency]);
+    setStats(calcStats([], details));
+  }, [details, calcStats]);
 
   const handleDownload = useCallback(() => {
     if (routePoints.length < 2) {
@@ -259,8 +269,18 @@ export default function CreatePage() {
           {/* Data Visualization (below map on desktop, collapsible) */}
           <div className="border-t dark:border-gray-800 bg-white dark:bg-gray-950 p-4 hidden lg:block">
             <div className="grid grid-cols-2 gap-6">
-              <PaceProfile points={routePoints} averagePace={details.paceMinPerKm} />
-              <ElevationProfile points={routePoints} />
+              {details.activityType === "bike" ? (
+                <>
+                  <SpeedProfile points={routePoints} averageSpeed={details.avgSpeedKmh} />
+                  <ElevationProfile points={routePoints} />
+                  {details.includePower && <PowerProfile points={routePoints} />}
+                </>
+              ) : (
+                <>
+                  <PaceProfile points={routePoints} averagePace={details.paceMinPerKm} />
+                  <ElevationProfile points={routePoints} />
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -290,8 +310,18 @@ export default function CreatePage() {
 
           {/* Mobile data viz */}
           <div className="lg:hidden p-4 border-t dark:border-gray-800 space-y-4">
-            <PaceProfile points={routePoints} averagePace={details.paceMinPerKm} />
-            <ElevationProfile points={routePoints} />
+            {details.activityType === "bike" ? (
+              <>
+                <SpeedProfile points={routePoints} averageSpeed={details.avgSpeedKmh} />
+                <ElevationProfile points={routePoints} />
+                {details.includePower && <PowerProfile points={routePoints} />}
+              </>
+            ) : (
+              <>
+                <PaceProfile points={routePoints} averagePace={details.paceMinPerKm} />
+                <ElevationProfile points={routePoints} />
+              </>
+            )}
           </div>
         </div>
       </div>

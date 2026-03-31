@@ -30,8 +30,15 @@ function humanizeTimestamps(
   const totalDistance = points[points.length - 1].distance;
   if (totalDistance === 0) return points;
 
-  const basePaceSecPerMeter = (details.paceMinPerKm * 60) / 1000;
-  const seed = details.date.length + details.paceMinPerKm * 100;
+  const isBike = details.activityType === "bike";
+
+  // For bike mode, convert speed to pace
+  const effectivePace = isBike
+    ? 60 / details.avgSpeedKmh  // min/km from km/h
+    : details.paceMinPerKm;
+
+  const basePaceSecPerMeter = (effectivePace * 60) / 1000;
+  const seed = details.date.length + effectivePace * 100;
   const rng = mulberry32(seed);
   const inconsistency = details.paceInconsistency / 100;
 
@@ -48,7 +55,9 @@ function humanizeTimestamps(
       result.push({
         ...points[i],
         timestamp: new Date(currentTime).toISOString(),
-        heartRate: details.includeHeartRate ? 130 + Math.round(rng() * 20) : undefined,
+        heartRate: details.includeHeartRate ? (isBike ? 120 : 130) + Math.round(rng() * 20) : undefined,
+        cadence: isBike && details.includeCadence ? details.avgCadence + Math.round((rng() - 0.5) * 10) : undefined,
+        power: isBike && details.includePower ? Math.round(details.ftp * 0.7 + (rng() - 0.5) * 30) : undefined,
       });
       continue;
     }
@@ -59,28 +68,44 @@ function humanizeTimestamps(
         ...points[i],
         timestamp: new Date(currentTime).toISOString(),
         heartRate: details.includeHeartRate ? result[i - 1].heartRate : undefined,
+        cadence: isBike && details.includeCadence ? result[i - 1].cadence : undefined,
+        power: isBike && details.includePower ? result[i - 1].power : undefined,
       });
       continue;
     }
 
-    // Elevation impact on pace
+    // Elevation impact on pace (different for bike vs run)
     const elevDiff = points[i].elevation - points[i - 1].elevation;
     const gradient = segmentDist > 0 ? elevDiff / segmentDist : 0;
     let elevationMultiplier = 1.0;
-    if (gradient > 0) {
-      elevationMultiplier = 1.0 + gradient * 3.0; // uphills slow down
+    if (isBike) {
+      // Bikes are more affected by hills (gearing, gravity)
+      if (gradient > 0) {
+        elevationMultiplier = 1.0 + gradient * 8.0; // steep climbs massively slow down
+      } else {
+        elevationMultiplier = Math.max(0.4, 1.0 + gradient * 4.0); // downhills much faster
+      }
     } else {
-      elevationMultiplier = Math.max(0.7, 1.0 + gradient * 1.5); // downhills speed up
+      if (gradient > 0) {
+        elevationMultiplier = 1.0 + gradient * 3.0;
+      } else {
+        elevationMultiplier = Math.max(0.7, 1.0 + gradient * 1.5);
+      }
     }
 
-    // Fatigue model: +8% slowdown by end
+    // Fatigue model
     const progress = i / points.length;
-    const fatigueMultiplier = 1.0 + progress * 0.08;
+    const fatigueMultiplier = isBike
+      ? 1.0 + progress * 0.05  // cyclists fatigue less (more efficient)
+      : 1.0 + progress * 0.08;
 
-    // Micro-jitter: ±5% per segment + pace inconsistency
+    // Micro-jitter
     const jitter = 1.0 + (rng() - 0.5) * 0.1 + (rng() - 0.5) * inconsistency * 0.5;
 
-    const segmentPace = basePaceSecPerMeter * elevationMultiplier * fatigueMultiplier * jitter;
+    // Drafting effect for bike: ~30% less effort (faster)
+    const draftingFactor = isBike && details.drafting ? 0.75 : 1.0;
+
+    const segmentPace = basePaceSecPerMeter * elevationMultiplier * fatigueMultiplier * jitter * draftingFactor;
     const segmentTime = segmentDist * segmentPace;
 
     currentTime += segmentTime * 1000;
@@ -88,16 +113,49 @@ function humanizeTimestamps(
     // Heart rate simulation
     let hr: number | undefined;
     if (details.includeHeartRate) {
-      const baseHr = details.activityType === "run" ? 155 : 140;
+      const baseHr = isBike ? 135 : 155;
       const effortFactor = elevationMultiplier * fatigueMultiplier;
       hr = Math.round(baseHr * effortFactor + (rng() - 0.5) * 10);
-      hr = Math.max(100, Math.min(200, hr));
+      hr = Math.max(90, Math.min(200, hr));
+    }
+
+    // Cadence simulation (bike only)
+    let cadence: number | undefined;
+    if (isBike && details.includeCadence) {
+      const baseCadence = details.avgCadence;
+      // Lower cadence on climbs, higher on flats/downhills
+      let cadenceModifier = 1.0;
+      if (gradient > 0.03) {
+        cadenceModifier = 0.85 - gradient * 2; // steep = lower cadence (grinding)
+      } else if (gradient < -0.03) {
+        cadenceModifier = 1.1; // descents = coasting / higher cadence
+      }
+      cadence = Math.round(baseCadence * cadenceModifier + (rng() - 0.5) * 8);
+      cadence = Math.max(40, Math.min(130, cadence));
+    }
+
+    // Power simulation (bike only)
+    let power: number | undefined;
+    if (isBike && details.includePower) {
+      const basePower = details.ftp * 0.7;
+      // More power on climbs, less on descents
+      let powerModifier = 1.0;
+      if (gradient > 0) {
+        powerModifier = 1.0 + gradient * 15; // steep climb = massive power
+      } else {
+        powerModifier = Math.max(0.2, 1.0 + gradient * 5); // descents = low power (coasting)
+      }
+      const fatiguePower = 1.0 - progress * 0.1; // power drops with fatigue
+      power = Math.round(basePower * powerModifier * fatiguePower + (rng() - 0.5) * 20);
+      power = Math.max(0, Math.min(details.ftp * 2, power));
     }
 
     result.push({
       ...points[i],
       timestamp: new Date(currentTime).toISOString(),
       heartRate: hr,
+      cadence,
+      power,
     });
   }
 
@@ -135,11 +193,14 @@ export function generateGPX(
         <ele>${pt.elevation.toFixed(1)}</ele>
 ${pt.timestamp ? `        <time>${pt.timestamp}</time>\n` : ""}`;
 
-    if (pt.heartRate) {
+    if (pt.heartRate || pt.cadence !== undefined || pt.power !== undefined) {
       gpx += `        <extensions>
           <gpxtpx:TrackPointExtension>
-            <gpxtpx:hr>${pt.heartRate}</gpxtpx:hr>
-          </gpxtpx:TrackPointExtension>
+`;
+      if (pt.heartRate) gpx += `            <gpxtpx:hr>${pt.heartRate}</gpxtpx:hr>\n`;
+      if (pt.cadence !== undefined) gpx += `            <gpxtpx:cad>${pt.cadence}</gpxtpx:cad>\n`;
+      if (pt.power !== undefined) gpx += `            <gpxtpx:power>${pt.power}</gpxtpx:power>\n`;
+      gpx += `          </gpxtpx:TrackPointExtension>
         </extensions>
 `;
     }

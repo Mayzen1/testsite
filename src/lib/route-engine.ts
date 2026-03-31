@@ -12,9 +12,9 @@ function getMapboxToken(): string {
   return token;
 }
 
-// Snap waypoints to roads via Mapbox Directions API (walking profile)
+// Snap waypoints to roads via Mapbox Directions API
 // Max 25 waypoints per request
-export async function snapToRoads(waypoints: Waypoint[]): Promise<{
+export async function snapToRoads(waypoints: Waypoint[], profile: 'walking' | 'cycling' = 'walking'): Promise<{
   geometry: [number, number][];
   distance: number;
 }> {
@@ -56,7 +56,7 @@ export async function snapToRoads(waypoints: Waypoint[]): Promise<{
     }
 
     try {
-      const url = `https://api.mapbox.com/directions/v5/mapbox/walking/${coordStr}?geometries=geojson&overview=full&access_token=${token}`;
+      const url = `https://api.mapbox.com/directions/v5/mapbox/${profile}/${coordStr}?geometries=geojson&overview=full&access_token=${token}`;
       const res = await fetch(url);
       const data = await res.json();
 
@@ -169,18 +169,26 @@ export function buildRoutePoints(
 export function computeStats(
   points: RoutePoint[],
   paceMinPerKm: number,
-  paceInconsistency: number
+  paceInconsistency: number,
+  activityType: 'run' | 'bike' = 'run',
+  bikeOptions?: { avgSpeedKmh: number; ftp: number; avgCadence: number; weight: number }
 ): RouteStats {
-  if (points.length < 2) {
-    return {
-      totalDistance: 0,
-      totalElevationGain: 0,
-      totalElevationLoss: 0,
-      estimatedDuration: 0,
-      averagePace: paceMinPerKm,
-      paceInconsistency,
-    };
-  }
+  const emptyStats: RouteStats = {
+    totalDistance: 0,
+    totalElevationGain: 0,
+    totalElevationLoss: 0,
+    estimatedDuration: 0,
+    averagePace: paceMinPerKm,
+    paceInconsistency,
+    averageSpeedKmh: bikeOptions?.avgSpeedKmh || 25,
+    maxSpeedKmh: 0,
+    averagePower: 0,
+    normalizedPower: 0,
+    averageCadence: bikeOptions?.avgCadence || 85,
+    calories: 0,
+  };
+
+  if (points.length < 2) return emptyStats;
 
   let elevGain = 0;
   let elevLoss = 0;
@@ -192,7 +200,44 @@ export function computeStats(
     else elevLoss += Math.abs(diff);
   }
 
-  const durationSeconds = (totalDistance / 1000) * paceMinPerKm * 60;
+  const durationSeconds = activityType === 'bike' && bikeOptions
+    ? (totalDistance / 1000 / bikeOptions.avgSpeedKmh) * 3600
+    : (totalDistance / 1000) * paceMinPerKm * 60;
+
+  // Bike-specific calculations
+  let avgSpeedKmh = bikeOptions?.avgSpeedKmh || 25;
+  let maxSpeedKmh = avgSpeedKmh * 1.4;
+  let avgPower = 0;
+  let normalizedPower = 0;
+  let avgCadence = bikeOptions?.avgCadence || 85;
+  let calories = 0;
+
+  if (activityType === 'bike' && bikeOptions) {
+    avgSpeedKmh = bikeOptions.avgSpeedKmh;
+    // Estimate max speed: downhills + flat sprints
+    maxSpeedKmh = avgSpeedKmh * (1.3 + (elevLoss > 100 ? 0.3 : 0.1));
+
+    // Power estimation using simplified cycling power model
+    const weight = bikeOptions.weight;
+    const ftp = bikeOptions.ftp;
+    // Average power ~ 65-75% of FTP for endurance ride
+    const intensityFactor = 0.7 + (avgSpeedKmh / 100) * 0.3;
+    avgPower = Math.round(ftp * intensityFactor);
+
+    // Adjust power for elevation: more power on climbs
+    const climbingRatio = elevGain / Math.max(totalDistance / 1000, 1); // m gain per km
+    const climbBonus = climbingRatio * 2; // extra watts per m/km
+    avgPower = Math.round(avgPower + climbBonus);
+
+    // Normalized Power (NP) is typically 3-8% higher than avg power
+    normalizedPower = Math.round(avgPower * (1.03 + paceInconsistency * 0.001));
+
+    avgCadence = bikeOptions.avgCadence;
+
+    // Calories: power * time = energy in joules, adjusted by weight efficiency
+    const efficiency = 0.25; // ~25% mechanical efficiency
+    calories = Math.round((avgPower * durationSeconds) / 1000 / 4.184 / efficiency * (weight / 80));
+  }
 
   return {
     totalDistance,
@@ -201,5 +246,11 @@ export function computeStats(
     estimatedDuration: durationSeconds,
     averagePace: paceMinPerKm,
     paceInconsistency,
+    averageSpeedKmh: Math.round(avgSpeedKmh * 10) / 10,
+    maxSpeedKmh: Math.round(maxSpeedKmh * 10) / 10,
+    averagePower: avgPower,
+    normalizedPower,
+    averageCadence: Math.round(avgCadence),
+    calories,
   };
 }

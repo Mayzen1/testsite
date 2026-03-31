@@ -11,6 +11,8 @@ export interface RoutePoint {
   distance: number; // cumulative distance in meters
   timestamp?: string; // ISO 8601
   heartRate?: number;
+  cadence?: number; // rpm
+  power?: number; // watts
 }
 
 export interface RouteStats {
@@ -18,8 +20,16 @@ export interface RouteStats {
   totalElevationGain: number;
   totalElevationLoss: number;
   estimatedDuration: number; // seconds
+  // Run-specific
   averagePace: number; // min/km
   paceInconsistency: number; // percentage
+  // Bike-specific
+  averageSpeedKmh: number;
+  maxSpeedKmh: number;
+  averagePower: number; // watts
+  normalizedPower: number; // watts
+  averageCadence: number; // rpm
+  calories: number;
 }
 
 export type DrawMode = 'draw' | 'heart' | 'circle';
@@ -31,9 +41,19 @@ export interface RunDetails {
   startTime: string;
   description: string;
   activityType: ActivityType;
+  // Shared
   paceMinPerKm: number;
   paceInconsistency: number;
   includeHeartRate: boolean;
+  // Bike-specific
+  avgSpeedKmh: number;
+  ftp: number; // functional threshold power (watts)
+  includePower: boolean;
+  includeCadence: boolean;
+  avgCadence: number; // target cadence rpm
+  bikeType: 'road' | 'gravel' | 'mtb' | 'tt';
+  drafting: boolean;
+  weight: number; // rider + bike weight in kg
 }
 
 export interface TokenData {

@@ -38,3 +38,31 @@ export function formatPace(minPerKm: number): string {
   const secs = Math.round((minPerKm - mins) * 60);
   return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
+
+export function formatSpeed(kmh: number): string {
+  return `${kmh.toFixed(1)} km/h`;
+}
+
+export function formatPower(watts: number): string {
+  return `${Math.round(watts)} W`;
+}
+
+export function formatCadence(rpm: number): string {
+  return `${Math.round(rpm)} rpm`;
+}
+
+export function formatCalories(cal: number): string {
+  return `${Math.round(cal)} kcal`;
+}
+
+// Convert speed (km/h) to pace (min/km) for internal calculations
+export function speedToPace(kmh: number): number {
+  if (kmh <= 0) return 10;
+  return 60 / kmh;
+}
+
+// Convert pace (min/km) to speed (km/h)
+export function paceToSpeed(minPerKm: number): number {
+  if (minPerKm <= 0) return 30;
+  return 60 / minPerKm;
+}

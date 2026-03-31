@@ -258,26 +258,6 @@ class TokenStore {
     return tokens;
   }
 
-  // Email linking (mocked)
-  saveEmail(email: string): void {
-    if (typeof window === "undefined") return;
-    const data = { email, isVerified: true };
-    localStorage.setItem(KEYS.email, btoa(JSON.stringify(data)));
-  }
-
-  getEmail(): string | null {
-    if (typeof window === "undefined") return null;
-    try {
-      const raw = localStorage.getItem(KEYS.email);
-      if (raw) {
-        const data = JSON.parse(atob(raw));
-        return data.email || null;
-      }
-    } catch {
-      // ignore
-    }
-    return null;
-  }
 }
 
 // Singleton
