@@ -26,7 +26,18 @@ export function MapContainer({
   const markersRef = useRef<mapboxgl.Marker[]>([]);
   const [mapLoaded, setMapLoaded] = useState(false);
 
-  // Initialize map
+  // Keep a ref to the latest onMapClick so the map listener always calls the fresh version
+  const onMapClickRef = useRef(onMapClick);
+  useEffect(() => {
+    onMapClickRef.current = onMapClick;
+  }, [onMapClick]);
+
+  const onMapReadyRef = useRef(onMapReady);
+  useEffect(() => {
+    onMapReadyRef.current = onMapReady;
+  }, [onMapReady]);
+
+  // Initialize map (once)
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
@@ -73,11 +84,12 @@ export function MapContainer({
 
       setMapLoaded(true);
       mapRef.current = map;
-      onMapReady(map);
+      onMapReadyRef.current(map);
     });
 
+    // Use the ref so the handler always sees the latest callback
     map.on("click", (e) => {
-      onMapClick({ lng: e.lngLat.lng, lat: e.lngLat.lat }, map);
+      onMapClickRef.current({ lng: e.lngLat.lng, lat: e.lngLat.lat }, map);
     });
 
     // Resize handling
@@ -92,7 +104,6 @@ export function MapContainer({
       map.remove();
       mapRef.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Update route geometry on map
@@ -120,7 +131,6 @@ export function MapContainer({
 
   // Update markers
   useEffect(() => {
-    // Clear existing markers
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
 
@@ -140,11 +150,11 @@ export function MapContainer({
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
-    map.getCanvas().style.cursor = drawMode !== "draw" ? "crosshair" : "crosshair";
+    map.getCanvas().style.cursor = "crosshair";
   }, [drawMode]);
 
   return (
-    <div className="relative w-full h-full min-h-[400px]" style={{ position: "relative" }}>
+    <div className="relative w-full h-full min-h-[400px]">
       <div ref={mapContainerRef} className="absolute inset-0 rounded-lg overflow-hidden" style={{ width: "100%", height: "100%" }} />
       {!process.env.NEXT_PUBLIC_MAPBOX_TOKEN && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-lg">
