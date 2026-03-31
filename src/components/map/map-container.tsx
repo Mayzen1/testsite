@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import mapboxgl from "mapbox-gl";
-import "mapbox-gl/dist/mapbox-gl.css";
 import type { Waypoint, DrawMode } from "@/lib/types";
 
 interface MapContainerProps {
@@ -145,8 +144,8 @@ export function MapContainer({
   }, [drawMode]);
 
   return (
-    <div className="relative w-full h-full min-h-[400px]">
-      <div ref={mapContainerRef} className="absolute inset-0 rounded-lg overflow-hidden" />
+    <div className="relative w-full h-full min-h-[400px]" style={{ position: "relative" }}>
+      <div ref={mapContainerRef} className="absolute inset-0 rounded-lg overflow-hidden" style={{ width: "100%", height: "100%" }} />
       {!process.env.NEXT_PUBLIC_MAPBOX_TOKEN && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-100 dark:bg-gray-800 rounded-lg">
           <p className="text-sm text-gray-500 dark:text-gray-400 text-center px-4">
