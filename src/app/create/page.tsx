@@ -11,7 +11,7 @@ import { RunDetailsPanel } from "@/components/panels/run-details";
 import { PaceProfile, ElevationProfile, SpeedProfile, PowerProfile } from "@/components/panels/data-viz";
 import { useToast } from "@/components/ui/toast";
 import { snapToRoads, buildRoutePoints, computeStats } from "@/lib/route-engine";
-import { generateGPX } from "@/lib/gpx-generator";
+import { generateGPX, humanizeTimestamps } from "@/lib/gpx-generator";
 import { generateHeart, generateCircle } from "@/lib/shapes";
 import { getTokenStore } from "@/lib/token-store";
 import { flyTo } from "@/components/map/map-container";
@@ -69,6 +69,9 @@ export default function CreatePage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
+  // Preview points with timestamps applied (for charts)
+  const [previewPoints, setPreviewPoints] = useState<RoutePoint[]>([]);
+
   const calcStats = useCallback((pts: RoutePoint[], d: RunDetails) => {
     return computeStats(pts, d.paceMinPerKm, d.paceInconsistency, d.activityType, {
       avgSpeedKmh: d.avgSpeedKmh,
@@ -78,10 +81,13 @@ export default function CreatePage() {
     });
   }, []);
 
-  // Recalculate stats when any parameter changes
+  // Recalculate stats + preview timestamps when any parameter changes
   useEffect(() => {
     if (routePoints.length >= 2) {
       setStats(calcStats(routePoints, details));
+      setPreviewPoints(humanizeTimestamps(routePoints, details));
+    } else {
+      setPreviewPoints([]);
     }
   }, [details, routePoints, calcStats]);
 
@@ -271,14 +277,14 @@ export default function CreatePage() {
             <div className="grid grid-cols-2 gap-6">
               {details.activityType === "bike" ? (
                 <>
-                  <SpeedProfile points={routePoints} averageSpeed={details.avgSpeedKmh} />
-                  <ElevationProfile points={routePoints} />
-                  {details.includePower && <PowerProfile points={routePoints} />}
+                  <SpeedProfile points={previewPoints} averageSpeed={details.avgSpeedKmh} />
+                  <ElevationProfile points={previewPoints} />
+                  {details.includePower && <PowerProfile points={previewPoints} />}
                 </>
               ) : (
                 <>
-                  <PaceProfile points={routePoints} averagePace={details.paceMinPerKm} />
-                  <ElevationProfile points={routePoints} />
+                  <PaceProfile points={previewPoints} averagePace={details.paceMinPerKm} />
+                  <ElevationProfile points={previewPoints} />
                 </>
               )}
             </div>
