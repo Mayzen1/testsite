@@ -292,11 +292,13 @@ export function generateGPX(
   const name = details.name || `${activityName} Activity`;
 
   let gpx = `<?xml version="1.0" encoding="UTF-8"?>
-<gpx creator="FakeMyRun" version="1.1"
+<gpx creator="Garmin Connect" version="1.1"
   xmlns="http://www.topografix.com/GPX/1/1"
   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
   xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1"
-  xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd">
+  xmlns:gpxx="http://www.garmin.com/xmlschemas/GpxExtensions/v3"
+  xmlns:ns3="http://www.garmin.com/xmlschemas/TrackPointExtension/v2"
+  xsi:schemaLocation="http://www.topografix.com/GPX/1/1 http://www.topografix.com/GPX/1/1/gpx.xsd http://www.garmin.com/xmlschemas/GpxExtensions/v3 http://www8.garmin.com/xmlschemas/GpxExtensionsv3.xsd http://www.garmin.com/xmlschemas/TrackPointExtension/v1 http://www.garmin.com/xmlschemas/TrackPointExtensionv1.xsd http://www.garmin.com/xmlschemas/TrackPointExtension/v2 http://www.garmin.com/xmlschemas/TrackPointExtensionv2.xsd">
   <metadata>
     <name>${escapeXml(name)}</name>
     <desc>${escapeXml(details.description || "")}</desc>
@@ -304,7 +306,7 @@ export function generateGPX(
   </metadata>
   <trk>
     <name>${escapeXml(name)}</name>
-    <type>${details.activityType === "run" ? "9" : "1"}</type>
+    <type>${details.activityType === "run" ? "running" : "cycling"}</type>
     <trkseg>
 `;
 
@@ -313,16 +315,20 @@ export function generateGPX(
         <ele>${pt.elevation.toFixed(1)}</ele>
 ${pt.timestamp ? `        <time>${pt.timestamp}</time>\n` : ""}`;
 
-    if (pt.heartRate || pt.cadence !== undefined || pt.power !== undefined) {
-      gpx += `        <extensions>
-          <gpxtpx:TrackPointExtension>
-`;
-      if (pt.heartRate) gpx += `            <gpxtpx:hr>${pt.heartRate}</gpxtpx:hr>\n`;
-      if (pt.cadence !== undefined) gpx += `            <gpxtpx:cad>${pt.cadence}</gpxtpx:cad>\n`;
-      if (pt.power !== undefined) gpx += `            <gpxtpx:power>${pt.power}</gpxtpx:power>\n`;
-      gpx += `          </gpxtpx:TrackPointExtension>
-        </extensions>
-`;
+    const hasTPX = pt.heartRate || pt.cadence !== undefined;
+    const hasPower = pt.power !== undefined;
+    if (hasTPX || hasPower) {
+      gpx += `        <extensions>\n`;
+      if (hasTPX) {
+        gpx += `          <gpxtpx:TrackPointExtension>\n`;
+        if (pt.heartRate) gpx += `            <gpxtpx:hr>${pt.heartRate}</gpxtpx:hr>\n`;
+        if (pt.cadence !== undefined) gpx += `            <gpxtpx:cad>${pt.cadence}</gpxtpx:cad>\n`;
+        gpx += `          </gpxtpx:TrackPointExtension>\n`;
+      }
+      if (hasPower) {
+        gpx += `          <power>${pt.power}</power>\n`;
+      }
+      gpx += `        </extensions>\n`;
     }
     gpx += `      </trkpt>\n`;
   }

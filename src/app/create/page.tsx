@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import dynamic from "next/dynamic";
 import mapboxgl from "mapbox-gl";
-import { Pencil, Heart, Circle, Eye, EyeOff, Undo2, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Pencil, Heart, Circle, Route, Eye, EyeOff, Undo2, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
 import { Header } from "@/components/header";
 import { Button } from "@/components/ui/button";
 import { SearchBar } from "@/components/map/search-bar";
@@ -12,7 +12,7 @@ import { PaceProfile, ElevationProfile, SpeedProfile, PowerProfile } from "@/com
 import { useToast } from "@/components/ui/toast";
 import { snapToRoads, buildRoutePoints, computeStats } from "@/lib/route-engine";
 import { generateGPX, humanizeTimestamps } from "@/lib/gpx-generator";
-import { generateHeart, generateCircle } from "@/lib/shapes";
+import { generateHeart, generateCircle, generateLoop } from "@/lib/shapes";
 import { getTokenStore } from "@/lib/token-store";
 import { flyTo } from "@/components/map/map-container";
 import type { Waypoint, RoutePoint, RouteStats, DrawMode, RunDetails } from "@/lib/types";
@@ -40,6 +40,7 @@ const defaultDetails: RunDetails = {
   bikeType: "road",
   drafting: false,
   weight: 80,
+  loopDistanceKm: 30,
 };
 
 export default function CreatePage() {
@@ -130,6 +131,17 @@ export default function CreatePage() {
         const newWaypoints = [...waypoints, newWp];
         setWaypoints(newWaypoints);
         await processRoute(newWaypoints);
+      } else if (drawMode === "loop") {
+        toast({
+          title: "Generating loop route",
+          description: `Creating a ~${details.loopDistanceKm}km loop...`,
+        });
+        const loopWaypoints = generateLoop(
+          [lngLat.lng, lngLat.lat],
+          details.loopDistanceKm
+        );
+        setWaypoints(loopWaypoints);
+        await processRoute(loopWaypoints);
       } else {
         // Shape mode: generate shape centered on click
         const shapeName = drawMode === "heart" ? "Heart" : "Circle";
@@ -147,7 +159,7 @@ export default function CreatePage() {
         await processRoute(shapeWaypoints);
       }
     },
-    [waypoints, drawMode, isProcessing, processRoute, toast]
+    [waypoints, drawMode, isProcessing, processRoute, toast, details.loopDistanceKm]
   );
 
   const handleUndo = useCallback(async () => {
@@ -240,6 +252,14 @@ export default function CreatePage() {
                 <Circle className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Circle</span>
               </Button>
+              <Button
+                size="sm"
+                variant={drawMode === "loop" ? "default" : "secondary"}
+                onClick={() => setDrawMode("loop")}
+              >
+                <Route className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Loop</span>
+              </Button>
 
               <div className="w-px h-6 bg-gray-300 dark:bg-gray-700 mx-1" />
 
@@ -254,6 +274,24 @@ export default function CreatePage() {
               </Button>
             </div>
           </div>
+
+          {/* Loop distance slider */}
+          {drawMode === "loop" && (
+            <div className="flex items-center gap-3 px-4 py-2 border-b dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
+              <Route className="h-4 w-4 text-orange-500 shrink-0" />
+              <span className="text-sm font-medium dark:text-white whitespace-nowrap">Loop distance:</span>
+              <input
+                type="range"
+                min={5}
+                max={100}
+                step={1}
+                value={details.loopDistanceKm}
+                onChange={(e) => setDetails({ ...details, loopDistanceKm: Number(e.target.value) })}
+                className="flex-1 accent-orange-500"
+              />
+              <span className="text-sm font-mono text-orange-500 w-14 text-right">{details.loopDistanceKm} km</span>
+            </div>
+          )}
 
           {/* Map */}
           <div className="flex-1 relative">

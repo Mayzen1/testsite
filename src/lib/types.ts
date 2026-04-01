@@ -32,7 +32,7 @@ export interface RouteStats {
   calories: number;
 }
 
-export type DrawMode = 'draw' | 'heart' | 'circle';
+export type DrawMode = 'draw' | 'heart' | 'circle' | 'loop';
 export type ActivityType = 'run' | 'bike';
 
 export interface RunDetails {
@@ -54,6 +54,7 @@ export interface RunDetails {
   bikeType: 'road' | 'gravel' | 'mtb' | 'tt';
   drafting: boolean;
   weight: number; // rider + bike weight in kg
+  loopDistanceKm: number; // target distance for loop mode
 }
 
 export interface TokenData {
