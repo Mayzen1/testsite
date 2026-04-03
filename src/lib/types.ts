@@ -20,10 +20,6 @@ export interface RouteStats {
   totalElevationGain: number;
   totalElevationLoss: number;
   estimatedDuration: number; // seconds
-  // Run-specific
-  averagePace: number; // min/km
-  paceInconsistency: number; // percentage
-  // Bike-specific
   averageSpeedKmh: number;
   maxSpeedKmh: number;
   averagePower: number; // watts
@@ -33,28 +29,23 @@ export interface RouteStats {
 }
 
 export type DrawMode = 'draw' | 'heart' | 'circle' | 'loop';
-export type ActivityType = 'run' | 'bike';
 
-export interface RunDetails {
+export interface RideDetails {
   name: string;
   date: string;
   startTime: string;
   description: string;
-  activityType: ActivityType;
-  // Shared
-  paceMinPerKm: number;
-  paceInconsistency: number;
-  includeHeartRate: boolean;
-  // Bike-specific
   avgSpeedKmh: number;
-  ftp: number; // functional threshold power (watts)
+  speedVariability: number; // 0-50 percentage
+  includeHeartRate: boolean;
+  ftp: number;
   includePower: boolean;
   includeCadence: boolean;
-  avgCadence: number; // target cadence rpm
+  avgCadence: number;
   bikeType: 'road' | 'gravel' | 'mtb' | 'tt';
   drafting: boolean;
-  weight: number; // rider + bike weight in kg
-  loopDistanceKm: number; // target distance for loop mode
+  weight: number; // rider + bike kg
+  loopDistanceKm: number;
 }
 
 export interface TokenData {

@@ -11,32 +11,28 @@ export function Header() {
   const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
-    const store = getTokenStore();
-    const count = store.initialize();
-    setTokens(count);
+    setTokens(getTokenStore().initialize());
   }, []);
-
-  const refreshTokens = () => {
-    setTokens(getTokenStore().getTokenCount());
-  };
 
   const handleAddTokens = () => {
     getTokenStore().addTokens(5);
-    refreshTokens();
+    setTokens(getTokenStore().getTokenCount());
   };
 
   return (
     <header className="sticky top-0 z-40 w-full border-b bg-white/95 backdrop-blur dark:bg-gray-950/95 dark:border-gray-800">
       <div className="flex h-14 items-center justify-between px-4 max-w-screen-2xl mx-auto">
-        {/* Logo */}
         <Link href="/" className="flex items-center gap-2 font-bold text-lg">
           <span className="text-orange-500">Fake</span>
           <span className="dark:text-white">My</span>
-          <span className="text-orange-500">Run</span>
+          <span className="text-orange-500">Ride</span>
         </Link>
 
         {/* Desktop nav */}
         <nav className="hidden md:flex items-center gap-6">
+          <Link href="/create" className="text-sm text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors">
+            Create Route
+          </Link>
           <Link href="/how-it-works" className="text-sm text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition-colors">
             How It Works
           </Link>
@@ -44,7 +40,6 @@ export function Header() {
             How To Upload
           </Link>
 
-          {/* Token badge */}
           <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 rounded-full px-3 py-1.5">
             <Coins className="h-4 w-4 text-orange-500" />
             <span className="text-sm font-medium dark:text-white">{tokens}</span>
@@ -71,29 +66,16 @@ export function Header() {
         </div>
       </div>
 
-      {/* Mobile menu */}
       {menuOpen && (
         <div className="md:hidden border-t dark:border-gray-800 bg-white dark:bg-gray-950 px-4 py-4 space-y-3">
-          <Link
-            href="/how-it-works"
-            className="block text-sm text-gray-600 dark:text-gray-400"
-            onClick={() => setMenuOpen(false)}
-          >
+          <Link href="/create" className="block text-sm text-gray-600 dark:text-gray-400" onClick={() => setMenuOpen(false)}>
+            Create Route
+          </Link>
+          <Link href="/how-it-works" className="block text-sm text-gray-600 dark:text-gray-400" onClick={() => setMenuOpen(false)}>
             How It Works
           </Link>
-          <Link
-            href="/how-to-upload"
-            className="block text-sm text-gray-600 dark:text-gray-400"
-            onClick={() => setMenuOpen(false)}
-          >
+          <Link href="/how-to-upload" className="block text-sm text-gray-600 dark:text-gray-400" onClick={() => setMenuOpen(false)}>
             How To Upload
-          </Link>
-          <Link
-            href="/create"
-            className="block text-sm text-gray-600 dark:text-gray-400"
-            onClick={() => setMenuOpen(false)}
-          >
-            Create Route
           </Link>
           <Button size="sm" className="w-full" onClick={() => { handleAddTokens(); setMenuOpen(false); }}>
             Get Free Tokens

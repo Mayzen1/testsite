@@ -3,12 +3,11 @@ import { ToastProvider } from "@/components/ui/toast";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "FakeMyRun - Create Fake Running Routes",
+  title: "FakeMyRide - Create Fake Cycling Routes",
   description:
-    "Create custom, realistic running routes and export them as GPX files. Design routes in any shape, with accurate elevation, pace, and timestamps.",
+    "Create custom, realistic cycling routes and export them as GPX files. Design routes with accurate elevation, speed, power, cadence, and heart rate data.",
 };
 
-// Dark mode init script
 const themeScript = `
 (function() {
   try {

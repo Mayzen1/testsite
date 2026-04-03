@@ -7,32 +7,29 @@ import { Pencil, Heart, Circle, Route, Eye, EyeOff, Undo2, Trash2, ChevronLeft, 
 import { Header } from "@/components/header";
 import { Button } from "@/components/ui/button";
 import { SearchBar } from "@/components/map/search-bar";
-import { RunDetailsPanel } from "@/components/panels/run-details";
-import { PaceProfile, ElevationProfile, SpeedProfile, PowerProfile } from "@/components/panels/data-viz";
+import { RideDetailsPanel } from "@/components/panels/ride-details";
+import { ElevationProfile, SpeedProfile, PowerProfile, CadenceProfile } from "@/components/panels/data-viz";
 import { useToast } from "@/components/ui/toast";
 import { snapToRoads, buildRoutePoints, computeStats } from "@/lib/route-engine";
 import { generateGPX, humanizeTimestamps } from "@/lib/gpx-generator";
 import { generateHeart, generateCircle, generateLoop } from "@/lib/shapes";
 import { getTokenStore } from "@/lib/token-store";
 import { flyTo } from "@/components/map/map-container";
-import type { Waypoint, RoutePoint, RouteStats, DrawMode, RunDetails } from "@/lib/types";
+import type { Waypoint, RoutePoint, RouteStats, DrawMode, RideDetails } from "@/lib/types";
 
-// Dynamic import for MapContainer (no SSR due to mapbox-gl)
 const MapContainer = dynamic(
   () => import("@/components/map/map-container").then((m) => m.MapContainer),
   { ssr: false, loading: () => <div className="w-full h-full bg-gray-100 dark:bg-gray-800 rounded-lg animate-pulse" /> }
 );
 
-const defaultDetails: RunDetails = {
-  name: "Morning Run",
+const defaultDetails: RideDetails = {
+  name: "Morning Ride",
   date: new Date().toISOString().split("T")[0],
   startTime: "07:30",
   description: "",
-  activityType: "run",
-  paceMinPerKm: 5.5,
-  paceInconsistency: 5,
-  includeHeartRate: false,
   avgSpeedKmh: 25,
+  speedVariability: 5,
+  includeHeartRate: false,
   ftp: 200,
   includePower: false,
   includeCadence: false,
@@ -43,6 +40,19 @@ const defaultDetails: RunDetails = {
   loopDistanceKm: 30,
 };
 
+const emptyStats: RouteStats = {
+  totalDistance: 0,
+  totalElevationGain: 0,
+  totalElevationLoss: 0,
+  estimatedDuration: 0,
+  averageSpeedKmh: 25,
+  maxSpeedKmh: 0,
+  averagePower: 0,
+  normalizedPower: 0,
+  averageCadence: 85,
+  calories: 0,
+};
+
 export default function CreatePage() {
   const { toast } = useToast();
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -50,39 +60,22 @@ export default function CreatePage() {
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
   const [routeGeometry, setRouteGeometry] = useState<[number, number][]>([]);
   const [routePoints, setRoutePoints] = useState<RoutePoint[]>([]);
-  const [stats, setStats] = useState<RouteStats>({
-    totalDistance: 0,
-    totalElevationGain: 0,
-    totalElevationLoss: 0,
-    estimatedDuration: 0,
-    averagePace: 5.5,
-    paceInconsistency: 5,
-    averageSpeedKmh: 25,
-    maxSpeedKmh: 0,
-    averagePower: 0,
-    normalizedPower: 0,
-    averageCadence: 85,
-    calories: 0,
-  });
-  const [details, setDetails] = useState<RunDetails>(defaultDetails);
+  const [stats, setStats] = useState<RouteStats>(emptyStats);
+  const [details, setDetails] = useState<RideDetails>(defaultDetails);
   const [drawMode, setDrawMode] = useState<DrawMode>("draw");
   const [showWaypoints, setShowWaypoints] = useState(true);
   const [isProcessing, setIsProcessing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-
-  // Preview points with timestamps applied (for charts)
   const [previewPoints, setPreviewPoints] = useState<RoutePoint[]>([]);
 
-  const calcStats = useCallback((pts: RoutePoint[], d: RunDetails) => {
-    return computeStats(pts, d.paceMinPerKm, d.paceInconsistency, d.activityType, {
-      avgSpeedKmh: d.avgSpeedKmh,
+  const calcStats = useCallback((pts: RoutePoint[], d: RideDetails) => {
+    return computeStats(pts, d.avgSpeedKmh, d.speedVariability, {
       ftp: d.ftp,
       avgCadence: d.avgCadence,
       weight: d.weight,
     });
   }, []);
 
-  // Recalculate stats + preview timestamps when any parameter changes
   useEffect(() => {
     if (routePoints.length >= 2) {
       setStats(calcStats(routePoints, details));
@@ -97,24 +90,21 @@ export default function CreatePage() {
       if (wps.length < 2) {
         setRouteGeometry([]);
         setRoutePoints([]);
-        setStats(calcStats([], details));
+        setStats(emptyStats);
         return;
       }
 
       setIsProcessing(true);
       try {
-        const profile = details.activityType === 'bike' ? 'cycling' : 'walking';
-        const { geometry } = await snapToRoads(wps, profile);
+        const { geometry } = await snapToRoads(wps);
         setRouteGeometry(geometry);
-
         const points = buildRoutePoints(geometry, mapRef.current);
         setRoutePoints(points);
         setStats(calcStats(points, details));
       } catch (error) {
         console.error("Route processing error:", error);
-        toast({ title: "Route Error", description: "Could not process route. Using raw points.", variant: "error" });
-        const fallback = wps.map((w): [number, number] => [w.lng, w.lat]);
-        setRouteGeometry(fallback);
+        toast({ title: "Route Error", description: "Could not process route.", variant: "error" });
+        setRouteGeometry(wps.map((w): [number, number] => [w.lng, w.lat]));
       } finally {
         setIsProcessing(false);
       }
@@ -127,36 +117,22 @@ export default function CreatePage() {
       if (isProcessing) return;
 
       if (drawMode === "draw") {
-        const newWp: Waypoint = { lng: lngLat.lng, lat: lngLat.lat };
-        const newWaypoints = [...waypoints, newWp];
+        const newWaypoints = [...waypoints, { lng: lngLat.lng, lat: lngLat.lat }];
         setWaypoints(newWaypoints);
         await processRoute(newWaypoints);
       } else if (drawMode === "loop") {
-        toast({
-          title: "Generating loop route",
-          description: `Creating a ~${details.loopDistanceKm}km loop...`,
-        });
-        const loopWaypoints = generateLoop(
-          [lngLat.lng, lngLat.lat],
-          details.loopDistanceKm
-        );
-        setWaypoints(loopWaypoints);
-        await processRoute(loopWaypoints);
+        toast({ title: "Generating loop", description: `~${details.loopDistanceKm}km loop...` });
+        const loopWps = generateLoop([lngLat.lng, lngLat.lat], details.loopDistanceKm);
+        setWaypoints(loopWps);
+        await processRoute(loopWps);
       } else {
-        // Shape mode: generate shape centered on click
-        const shapeName = drawMode === "heart" ? "Heart" : "Circle";
-        toast({
-          title: `${shapeName} shape recentered`,
-          description: "Generating shape at new location...",
-        });
-
-        const shapeWaypoints =
-          drawMode === "heart"
-            ? generateHeart([lngLat.lng, lngLat.lat], 2)
-            : generateCircle([lngLat.lng, lngLat.lat], 2);
-
-        setWaypoints(shapeWaypoints);
-        await processRoute(shapeWaypoints);
+        const isHeart = drawMode === "heart";
+        toast({ title: `${isHeart ? "Heart" : "Circle"} shape`, description: "Generating..." });
+        const shapeWps = isHeart
+          ? generateHeart([lngLat.lng, lngLat.lat], 2)
+          : generateCircle([lngLat.lng, lngLat.lat], 2);
+        setWaypoints(shapeWps);
+        await processRoute(shapeWps);
       }
     },
     [waypoints, drawMode, isProcessing, processRoute, toast, details.loopDistanceKm]
@@ -173,43 +149,35 @@ export default function CreatePage() {
     setWaypoints([]);
     setRouteGeometry([]);
     setRoutePoints([]);
-    setStats(calcStats([], details));
-  }, [details, calcStats]);
+    setStats(emptyStats);
+  }, []);
 
   const handleDownload = useCallback(() => {
     if (routePoints.length < 2) {
       toast({ title: "No route", description: "Draw a route first.", variant: "error" });
       return;
     }
-
     const store = getTokenStore();
     if (!store.useToken()) {
       toast({ title: "No tokens", description: "Get free tokens to download.", variant: "error" });
       return;
     }
-
     const gpx = generateGPX(routePoints, details);
     const blob = new Blob([gpx], { type: "application/gpx+xml" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${details.name.replace(/\s+/g, "_") || "route"}.gpx`;
+    a.download = `${details.name.replace(/\s+/g, "_") || "ride"}.gpx`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-
     toast({ title: "GPX Downloaded!", description: "1 token consumed.", variant: "success" });
   }, [routePoints, details, toast]);
 
-  const handleSearchSelect = useCallback(
-    (lng: number, lat: number) => {
-      if (mapRef.current) {
-        flyTo(mapRef.current, lng, lat);
-      }
-    },
-    []
-  );
+  const handleSearchSelect = useCallback((lng: number, lat: number) => {
+    if (mapRef.current) flyTo(mapRef.current, lng, lat);
+  }, []);
 
   const handleMapReady = useCallback((map: mapboxgl.Map) => {
     mapRef.current = map;
@@ -227,36 +195,19 @@ export default function CreatePage() {
             <SearchBar onSelect={handleSearchSelect} />
 
             <div className="flex items-center gap-1 ml-auto">
-              {/* Draw mode buttons */}
-              <Button
-                size="sm"
-                variant={drawMode === "draw" ? "default" : "secondary"}
-                onClick={() => setDrawMode("draw")}
-              >
+              <Button size="sm" variant={drawMode === "draw" ? "default" : "secondary"} onClick={() => setDrawMode("draw")}>
                 <Pencil className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Draw</span>
               </Button>
-              <Button
-                size="sm"
-                variant={drawMode === "heart" ? "default" : "secondary"}
-                onClick={() => setDrawMode("heart")}
-              >
+              <Button size="sm" variant={drawMode === "heart" ? "default" : "secondary"} onClick={() => setDrawMode("heart")}>
                 <Heart className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Heart</span>
               </Button>
-              <Button
-                size="sm"
-                variant={drawMode === "circle" ? "default" : "secondary"}
-                onClick={() => setDrawMode("circle")}
-              >
+              <Button size="sm" variant={drawMode === "circle" ? "default" : "secondary"} onClick={() => setDrawMode("circle")}>
                 <Circle className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Circle</span>
               </Button>
-              <Button
-                size="sm"
-                variant={drawMode === "loop" ? "default" : "secondary"}
-                onClick={() => setDrawMode("loop")}
-              >
+              <Button size="sm" variant={drawMode === "loop" ? "default" : "secondary"} onClick={() => setDrawMode("loop")}>
                 <Route className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">Loop</span>
               </Button>
@@ -310,26 +261,18 @@ export default function CreatePage() {
             )}
           </div>
 
-          {/* Data Visualization (below map on desktop, collapsible) */}
+          {/* Data Viz (desktop) */}
           <div className="border-t dark:border-gray-800 bg-white dark:bg-gray-950 p-4 hidden lg:block">
             <div className="grid grid-cols-2 gap-6">
-              {details.activityType === "bike" ? (
-                <>
-                  <SpeedProfile points={previewPoints} averageSpeed={details.avgSpeedKmh} />
-                  <ElevationProfile points={previewPoints} />
-                  {details.includePower && <PowerProfile points={previewPoints} />}
-                </>
-              ) : (
-                <>
-                  <PaceProfile points={previewPoints} averagePace={details.paceMinPerKm} />
-                  <ElevationProfile points={previewPoints} />
-                </>
-              )}
+              <SpeedProfile points={previewPoints} averageSpeed={details.avgSpeedKmh} />
+              <ElevationProfile points={previewPoints} />
+              {details.includePower && <PowerProfile points={previewPoints} />}
+              {details.includeCadence && <CadenceProfile points={previewPoints} />}
             </div>
           </div>
         </div>
 
-        {/* Sidebar toggle for mobile */}
+        {/* Mobile sidebar toggle */}
         <button
           onClick={() => setSidebarOpen(!sidebarOpen)}
           className="lg:hidden fixed bottom-4 right-4 z-30 bg-orange-500 text-white rounded-full p-3 shadow-lg cursor-pointer"
@@ -344,7 +287,7 @@ export default function CreatePage() {
             sidebarOpen ? "translate-x-0" : "translate-x-full"
           } fixed lg:relative right-0 top-14 bottom-0 w-80 lg:w-96 bg-white dark:bg-gray-950 border-l dark:border-gray-800 overflow-y-auto transition-transform lg:translate-x-0 z-20`}
         >
-          <RunDetailsPanel
+          <RideDetailsPanel
             stats={stats}
             details={details}
             onDetailsChange={setDetails}
@@ -354,18 +297,10 @@ export default function CreatePage() {
 
           {/* Mobile data viz */}
           <div className="lg:hidden p-4 border-t dark:border-gray-800 space-y-4">
-            {details.activityType === "bike" ? (
-              <>
-                <SpeedProfile points={routePoints} averageSpeed={details.avgSpeedKmh} />
-                <ElevationProfile points={routePoints} />
-                {details.includePower && <PowerProfile points={routePoints} />}
-              </>
-            ) : (
-              <>
-                <PaceProfile points={routePoints} averagePace={details.paceMinPerKm} />
-                <ElevationProfile points={routePoints} />
-              </>
-            )}
+            <SpeedProfile points={previewPoints} averageSpeed={details.avgSpeedKmh} />
+            <ElevationProfile points={previewPoints} />
+            {details.includePower && <PowerProfile points={previewPoints} />}
+            {details.includeCadence && <CadenceProfile points={previewPoints} />}
           </div>
         </div>
       </div>

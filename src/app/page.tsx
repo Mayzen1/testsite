@@ -15,12 +15,12 @@ export default function HomePage() {
             <div>
               <h1 className="text-4xl md:text-5xl font-bold tracking-tight dark:text-white">
                 Create{" "}
-                <span className="text-orange-500">Fake Running Routes</span>
+                <span className="text-orange-500">Fake Cycling Routes</span>
               </h1>
               <p className="mt-6 text-lg text-gray-600 dark:text-gray-400 leading-relaxed">
-                Design custom, realistic running or cycling routes anywhere in the world.
-                Generate GPX files with accurate elevation, pace data, and timestamps.
-                Import them into Strava, Garmin, or any fitness app.
+                Design custom, realistic cycling routes anywhere in the world.
+                Generate GPX files with accurate elevation, speed, power, cadence,
+                and heart rate data. Import them into Strava, Garmin Connect, or any fitness app.
               </p>
               <div className="mt-8 flex flex-col sm:flex-row gap-4">
                 <Link
@@ -40,7 +40,7 @@ export default function HomePage() {
             <div className="relative aspect-video rounded-xl overflow-hidden shadow-2xl bg-gray-100 dark:bg-gray-800">
               <iframe
                 src="https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&mute=1&loop=1&controls=0"
-                title="FakeMyRun Demo"
+                title="FakeMyRide Demo"
                 className="absolute inset-0 w-full h-full"
                 allow="autoplay; encrypted-media"
                 allowFullScreen
@@ -61,19 +61,19 @@ export default function HomePage() {
               step={1}
               icon={<Route className="h-8 w-8 text-orange-500" />}
               title="Design Your Route"
-              description="Draw a route manually, or generate shapes like hearts and circles. Routes snap to real roads for authenticity."
+              description="Draw a route manually, generate shapes, or create random loop routes. All paths snap to real roads for authenticity."
             />
             <StepCard
               step={2}
               icon={<MapPin className="h-8 w-8 text-orange-500" />}
-              title="Generate GPX"
-              description="Configure pace, elevation, heart rate, and timestamps. Our engine creates realistic, plausible data."
+              title="Configure Your Ride"
+              description="Set speed, power, cadence, heart rate, and bike type. Our engine creates realistic, plausible cycling data."
             />
             <StepCard
               step={3}
               icon={<FileDown className="h-8 w-8 text-orange-500" />}
               title="Download & Import"
-              description="Download your GPX file and import it into Strava, Garmin, Nike Run Club, or any fitness platform."
+              description="Download your GPX file and import it into Strava, Garmin Connect, Wahoo, or any cycling platform."
             />
           </div>
           <p className="text-center text-sm text-gray-500 dark:text-gray-400 mt-8">
@@ -82,14 +82,14 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* CTA Section */}
+      {/* CTA */}
       <section className="py-16">
         <div className="max-w-4xl mx-auto px-4 text-center">
           <h2 className="text-3xl font-bold mb-4 dark:text-white">
-            Ready to Create Your Route?
+            Ready to Create Your Ride?
           </h2>
           <p className="text-gray-600 dark:text-gray-400 mb-8">
-            Start designing your custom running route now. No account needed.
+            Start designing your custom cycling route now. No account needed.
           </p>
           <Link
             href="/create"

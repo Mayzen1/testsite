@@ -3,18 +3,15 @@ import { haversineDistance } from "./utils";
 
 function getMapboxToken(): string {
   if (typeof window === "undefined") return "";
-  // Check sessionStorage first
   const cached = sessionStorage.getItem("mapbox_api_key");
   if (cached) return cached;
-
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
   if (token) sessionStorage.setItem("mapbox_api_key", token);
   return token;
 }
 
 // Snap waypoints to roads via Mapbox Directions API
-// Max 25 waypoints per request
-export async function snapToRoads(waypoints: Waypoint[], profile: 'walking' | 'cycling' = 'walking'): Promise<{
+export async function snapToRoads(waypoints: Waypoint[]): Promise<{
   geometry: [number, number][];
   distance: number;
 }> {
@@ -23,40 +20,34 @@ export async function snapToRoads(waypoints: Waypoint[], profile: 'walking' | 'c
   }
 
   const token = getMapboxToken();
-  if (!token) {
-    return fallbackGeometry(waypoints);
-  }
+  if (!token) return fallbackGeometry(waypoints);
 
   const MAX_PER_REQUEST = 25;
   const allCoords: [number, number][] = [];
   let totalDistance = 0;
 
-  // Batch waypoints in groups of 25
   for (let i = 0; i < waypoints.length; i += MAX_PER_REQUEST - 1) {
     const batch = waypoints.slice(i, i + MAX_PER_REQUEST);
     if (batch.length < 2) break;
 
     const coordStr = batch.map((w) => `${w.lng},${w.lat}`).join(";");
-
-    // Check cache
     const cacheKey = `route_${simpleHashStr(coordStr)}`;
     const cachedResult = sessionStorage.getItem(cacheKey);
+
     if (cachedResult) {
       try {
         const cached = JSON.parse(cachedResult);
-        if (i > 0 && allCoords.length > 0) {
-          cached.geometry.shift(); // remove duplicate junction point
-        }
+        if (i > 0 && allCoords.length > 0) cached.geometry.shift();
         allCoords.push(...cached.geometry);
         totalDistance += cached.distance;
         continue;
       } catch {
-        // cache invalid, fetch again
+        // cache invalid
       }
     }
 
     try {
-      const url = `https://api.mapbox.com/directions/v5/mapbox/${profile}/${coordStr}?geometries=geojson&overview=full&access_token=${token}`;
+      const url = `https://api.mapbox.com/directions/v5/mapbox/cycling/${coordStr}?geometries=geojson&overview=full&access_token=${token}`;
       const res = await fetch(url);
       const data = await res.json();
 
@@ -65,29 +56,23 @@ export async function snapToRoads(waypoints: Waypoint[], profile: 'walking' | 'c
         const coords: [number, number][] = route.geometry.coordinates;
         const dist: number = route.distance;
 
-        // Cache result
         sessionStorage.setItem(cacheKey, JSON.stringify({ geometry: coords, distance: dist }));
 
-        if (i > 0 && allCoords.length > 0) {
-          coords.shift();
-        }
+        if (i > 0 && allCoords.length > 0) coords.shift();
         allCoords.push(...coords);
         totalDistance += dist;
       } else {
-        // NoRoute fallback
         const fallback = batch.map((w): [number, number] => [w.lng, w.lat]);
         if (i > 0 && allCoords.length > 0) fallback.shift();
         allCoords.push(...fallback);
       }
     } catch {
-      // Network error fallback
       const fallback = batch.map((w): [number, number] => [w.lng, w.lat]);
       if (i > 0 && allCoords.length > 0) fallback.shift();
       allCoords.push(...fallback);
     }
   }
 
-  // Remove consecutive duplicates
   const deduped = allCoords.filter(
     (c, i) => i === 0 || c[0] !== allCoords[i - 1][0] || c[1] !== allCoords[i - 1][1]
   );
@@ -112,7 +97,6 @@ function simpleHashStr(str: string): string {
   return (hash >>> 0).toString(36);
 }
 
-// Query elevation from Mapbox terrain with fallback
 export function queryElevation(
   map: mapboxgl.Map | null,
   lng: number,
@@ -126,11 +110,9 @@ export function queryElevation(
       // fallback
     }
   }
-  // Pseudo-random fallback
   return Math.random() * 100;
 }
 
-// Subsample coordinates to a target count
 function subsample(coords: [number, number][], targetCount: number): [number, number][] {
   if (coords.length <= targetCount) return coords;
   const step = (coords.length - 1) / (targetCount - 1);
@@ -141,7 +123,6 @@ function subsample(coords: [number, number][], targetCount: number): [number, nu
   return result;
 }
 
-// Build full route points from snapped geometry
 export function buildRoutePoints(
   geometry: [number, number][],
   map: mapboxgl.Map | null
@@ -165,26 +146,22 @@ export function buildRoutePoints(
   });
 }
 
-// Compute stats from route points
 export function computeStats(
   points: RoutePoint[],
-  paceMinPerKm: number,
-  paceInconsistency: number,
-  activityType: 'run' | 'bike' = 'run',
-  bikeOptions?: { avgSpeedKmh: number; ftp: number; avgCadence: number; weight: number }
+  avgSpeedKmh: number,
+  speedVariability: number,
+  bikeOptions: { ftp: number; avgCadence: number; weight: number }
 ): RouteStats {
   const emptyStats: RouteStats = {
     totalDistance: 0,
     totalElevationGain: 0,
     totalElevationLoss: 0,
     estimatedDuration: 0,
-    averagePace: paceMinPerKm,
-    paceInconsistency,
-    averageSpeedKmh: bikeOptions?.avgSpeedKmh || 25,
+    averageSpeedKmh: avgSpeedKmh,
     maxSpeedKmh: 0,
     averagePower: 0,
     normalizedPower: 0,
-    averageCadence: bikeOptions?.avgCadence || 85,
+    averageCadence: bikeOptions.avgCadence,
     calories: 0,
   };
 
@@ -200,52 +177,30 @@ export function computeStats(
     else elevLoss += Math.abs(diff);
   }
 
-  const durationSeconds = activityType === 'bike' && bikeOptions
-    ? (totalDistance / 1000 / bikeOptions.avgSpeedKmh) * 3600
-    : (totalDistance / 1000) * paceMinPerKm * 60;
+  const durationSeconds = (totalDistance / 1000 / avgSpeedKmh) * 3600;
 
-  // Bike-specific calculations
-  let avgSpeedKmh = bikeOptions?.avgSpeedKmh || 25;
-  let maxSpeedKmh = avgSpeedKmh * 1.4;
-  let avgPower = 0;
-  let normalizedPower = 0;
-  let avgCadence = bikeOptions?.avgCadence || 85;
-  let calories = 0;
+  // Max speed: downhills + flat sprints
+  const maxSpeedKmh = avgSpeedKmh * (1.3 + (elevLoss > 100 ? 0.3 : 0.1));
 
-  if (activityType === 'bike' && bikeOptions) {
-    avgSpeedKmh = bikeOptions.avgSpeedKmh;
-    // Estimate max speed: downhills + flat sprints
-    maxSpeedKmh = avgSpeedKmh * (1.3 + (elevLoss > 100 ? 0.3 : 0.1));
+  // Power estimation
+  const { ftp, weight, avgCadence } = bikeOptions;
+  const intensityFactor = 0.7 + (avgSpeedKmh / 100) * 0.3;
+  let avgPower = Math.round(ftp * intensityFactor);
+  const climbingRatio = elevGain / Math.max(totalDistance / 1000, 1);
+  avgPower = Math.round(avgPower + climbingRatio * 2);
 
-    // Power estimation using simplified cycling power model
-    const weight = bikeOptions.weight;
-    const ftp = bikeOptions.ftp;
-    // Average power ~ 65-75% of FTP for endurance ride
-    const intensityFactor = 0.7 + (avgSpeedKmh / 100) * 0.3;
-    avgPower = Math.round(ftp * intensityFactor);
+  // Normalized Power
+  const normalizedPower = Math.round(avgPower * (1.03 + speedVariability * 0.001));
 
-    // Adjust power for elevation: more power on climbs
-    const climbingRatio = elevGain / Math.max(totalDistance / 1000, 1); // m gain per km
-    const climbBonus = climbingRatio * 2; // extra watts per m/km
-    avgPower = Math.round(avgPower + climbBonus);
-
-    // Normalized Power (NP) is typically 3-8% higher than avg power
-    normalizedPower = Math.round(avgPower * (1.03 + paceInconsistency * 0.001));
-
-    avgCadence = bikeOptions.avgCadence;
-
-    // Calories: power * time = energy in joules, adjusted by weight efficiency
-    const efficiency = 0.25; // ~25% mechanical efficiency
-    calories = Math.round((avgPower * durationSeconds) / 1000 / 4.184 / efficiency * (weight / 80));
-  }
+  // Calories
+  const efficiency = 0.25;
+  const calories = Math.round((avgPower * durationSeconds) / 1000 / 4.184 / efficiency * (weight / 80));
 
   return {
     totalDistance,
     totalElevationGain: Math.round(elevGain),
     totalElevationLoss: Math.round(elevLoss),
     estimatedDuration: durationSeconds,
-    averagePace: paceMinPerKm,
-    paceInconsistency,
     averageSpeedKmh: Math.round(avgSpeedKmh * 10) / 10,
     maxSpeedKmh: Math.round(maxSpeedKmh * 10) / 10,
     averagePower: avgPower,
