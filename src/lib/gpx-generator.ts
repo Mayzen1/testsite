@@ -95,7 +95,81 @@ export function humanizeTimestamps(
     }
   }
 
-  // Parse start time
+  // --- PASS 1: Compute raw variation multipliers per segment ---
+  // We compute all multipliers first, then normalize so total time matches target speed.
+  const segmentMultipliers: number[] = [0]; // index 0 = first point (no segment)
+  const segmentDistances: number[] = [0];
+
+  for (let i = 1; i < n; i++) {
+    const segmentDist = points[i].distance - points[i - 1].distance;
+    segmentDistances.push(segmentDist);
+
+    if (segmentDist <= 0) {
+      segmentMultipliers.push(1.0);
+      continue;
+    }
+
+    const progress = i / n;
+
+    // Elevation impact
+    const elevDiff = points[i].elevation - points[i - 1].elevation;
+    const gradient = elevDiff / segmentDist;
+    let elevMult = 1.0;
+    if (gradient > 0) {
+      elevMult = 1.0 + gradient * 12;
+    } else {
+      elevMult = Math.max(0.35, 1.0 + gradient * 5);
+    }
+
+    // Fatigue
+    const lastStretch = Math.max(0, (progress - 0.8) / 0.2);
+    const fatigueMult = 1.0 + progress * 0.03 + lastStretch * 0.06;
+
+    // Variation layers
+    const longEffect = longWave[i] * 0.04 * (1 + inconsistency * 2);
+    const medEffect = medWave[i] * 0.02 * (1 + inconsistency * 1.5);
+    const shortEffect = shortJitter[i] * 0.01 * (1 + inconsistency);
+    let variationMult = 1.0 + longEffect + medEffect + shortEffect;
+
+    // Intersection slowdown
+    if (intersections.has(i)) {
+      const zone = [...intersections].filter(x => Math.abs(x - i) <= 4);
+      const center = zone.reduce((a, b) => a + b, 0) / zone.length;
+      const distFromCenter = Math.abs(i - center) / 4;
+      const slowFactor = 1.3 + (1 - distFromCenter) * (0.8 + inconsistency * 1.5);
+      variationMult *= slowFactor;
+    }
+
+    // Surge / attack
+    if (surges.has(i)) {
+      variationMult *= 0.75 - inconsistency * 0.1;
+    }
+
+    // Warmup
+    const warmupMult = progress < 0.04 ? 1.08 - progress * 2 : 1.0;
+
+    segmentMultipliers.push(elevMult * fatigueMult * variationMult * warmupMult);
+  }
+
+  // --- Compute normalization factor ---
+  // Target total time = totalDistance / avgSpeedKmh (converted to seconds)
+  const targetTotalSeconds = (totalDistance / 1000 / details.avgSpeedKmh) * 3600;
+
+  // Raw weighted time (sum of segmentDist * multiplier)
+  let rawWeightedSum = 0;
+  for (let i = 1; i < n; i++) {
+    rawWeightedSum += segmentDistances[i] * segmentMultipliers[i];
+  }
+
+  // normalizedBasePace: if we multiply each segment by this, total time = target
+  // totalTime = sum(segmentDist[i] * normalizedBasePace * multiplier[i]) = targetTotalSeconds
+  // normalizedBasePace = targetTotalSeconds / rawWeightedSum
+  const normalizedBasePace = rawWeightedSum > 0 ? targetTotalSeconds / rawWeightedSum : basePaceSecPerMeter;
+
+  // Drafting reduces effort but doesn't change the average speed target
+  // (drafting means same speed at less power, not faster)
+
+  // --- PASS 2: Build timestamped points using normalized pace ---
   const [year, month, day] = details.date.split("-").map(Number);
   const [hour, minute] = details.startTime.split(":").map(Number);
   const startDate = new Date(year, month - 1, day, hour, minute, 0);
@@ -115,7 +189,7 @@ export function humanizeTimestamps(
       continue;
     }
 
-    const segmentDist = points[i].distance - points[i - 1].distance;
+    const segmentDist = segmentDistances[i];
     if (segmentDist <= 0) {
       result.push({
         ...points[i],
@@ -127,58 +201,18 @@ export function humanizeTimestamps(
       continue;
     }
 
-    const progress = i / n;
+    const segmentTime = segmentDist * normalizedBasePace * segmentMultipliers[i];
+    currentTime += segmentTime * 1000;
 
-    // --- Elevation impact ---
+    const progress = i / n;
     const elevDiff = points[i].elevation - points[i - 1].elevation;
     const gradient = elevDiff / segmentDist;
-    let elevMult = 1.0;
-    if (gradient > 0) {
-      elevMult = 1.0 + gradient * 12;
-    } else {
-      elevMult = Math.max(0.35, 1.0 + gradient * 5);
-    }
-
-    // --- Fatigue ---
-    const lastStretch = Math.max(0, (progress - 0.8) / 0.2);
-    const fatigueMult = 1.0 + progress * 0.03 + lastStretch * 0.06;
-
-    // --- Variation layers ---
-    const longEffect = longWave[i] * 0.04 * (1 + inconsistency * 2);
-    const medEffect = medWave[i] * 0.02 * (1 + inconsistency * 1.5);
-    const shortEffect = shortJitter[i] * 0.01 * (1 + inconsistency);
-
-    let variationMult = 1.0 + longEffect + medEffect + shortEffect;
-
-    // Intersection slowdown
-    if (intersections.has(i)) {
-      const zone = [...intersections].filter(x => Math.abs(x - i) <= 4);
-      const center = zone.reduce((a, b) => a + b, 0) / zone.length;
-      const distFromCenter = Math.abs(i - center) / 4;
-      const slowFactor = 1.3 + (1 - distFromCenter) * (0.8 + inconsistency * 1.5);
-      variationMult *= slowFactor;
-    }
-
-    // Surge / attack
-    if (surges.has(i)) {
-      variationMult *= 0.75 - inconsistency * 0.1;
-    }
-
-    // Drafting
-    const draftMult = details.drafting ? 0.78 : 1.0;
-
-    // Warmup: first 3-5% slightly slower
-    const warmupMult = progress < 0.04 ? 1.08 - progress * 2 : 1.0;
-
-    const segmentPace = basePaceSecPerMeter * elevMult * fatigueMult * variationMult * draftMult * warmupMult;
-    const segmentTime = segmentDist * segmentPace;
-    currentTime += segmentTime * 1000;
 
     // --- Heart rate ---
     let hr: number | undefined;
     if (details.includeHeartRate) {
       const baseHr = 132;
-      const effort = elevMult * fatigueMult * (1 / Math.max(variationMult, 0.5));
+      const effort = segmentMultipliers[i]; // higher mult = harder effort = higher HR
       const targetHr = baseHr * Math.min(effort, 1.4) + longWave[i] * 3;
       const prevHr = result[i - 1].heartRate || baseHr;
       hr = Math.round(prevHr * 0.85 + targetHr * 0.15 + (rng() - 0.5) * 4);
@@ -202,7 +236,7 @@ export function humanizeTimestamps(
       const targetCad = baseCad * cadMod + medWave[i] * 3;
       cadence = Math.round(prevCad * 0.7 + targetCad * 0.3 + (rng() - 0.5) * 4);
       cadence = Math.max(0, Math.min(130, cadence));
-      if (intersections.has(i) && variationMult > 1.8) cadence = Math.round(rng() * 20);
+      if (intersections.has(i) && segmentMultipliers[i] > 1.8) cadence = Math.round(rng() * 20);
     }
 
     // --- Power ---
@@ -215,11 +249,14 @@ export function humanizeTimestamps(
       } else {
         powMod = Math.max(0.05, 1.0 + gradient * 6);
       }
-      if (intersections.has(i) && variationMult > 1.5) powMod *= 0.1;
+      if (intersections.has(i) && segmentMultipliers[i] > 1.5) powMod *= 0.1;
       if (surges.has(i)) powMod *= 1.4 + inconsistency * 0.5;
 
+      // Drafting reduces power needed (same speed, less effort)
+      const draftPow = details.drafting ? 0.78 : 1.0;
+
       const fatiguePow = 1.0 - progress * 0.08;
-      const targetPow = basePow * powMod * fatiguePow + longWave[i] * 8;
+      const targetPow = basePow * powMod * fatiguePow * draftPow + longWave[i] * 8;
       const prevPow = result[i - 1].power || basePow;
       power = Math.round(prevPow * 0.6 + targetPow * 0.4 + (rng() - 0.5) * 10);
       power = Math.max(0, Math.min(details.ftp * 2.2, power));
